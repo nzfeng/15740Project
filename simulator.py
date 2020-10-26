@@ -1,4 +1,5 @@
 import numpy as np
+import sys
 
 
 class ChipArray(object):
@@ -13,8 +14,14 @@ class ChipArray(object):
     self.data = np.random.randn(num)
     self.mode = ChipArray.UNUSED
 
-  def __getitem__(self, index) -> float:
-    return self.data[index]
+  def __getitem__(self, index):
+    raise RuntimeError('Cannot access an array item directly. Must use Chip.get_item()')
+
+
+class ChipRegister(object):
+  def __init__(self, init_value: float):
+    self.data = init_value
+
 
 
 class Chip(object):
@@ -49,11 +56,6 @@ class Chip(object):
     self.array_list.append(a)
     return a
 
-  def register(self, init_value=0.0) -> ChipArray:
-    a = ChipArray(1, '')
-    a.data[0] = init_value
-    return a
-
   def _is_onchip(self, onchip_array: ChipArray) -> bool:
     idx = -1
     l = len(self.array_list)
@@ -63,7 +65,7 @@ class Chip(object):
         break
     return idx > -1
 
-  def check_onchip(self, array_list: list):
+  def _check_onchip(self, array_list: list):
     for a in array_list:
       if not self._is_onchip(a):
         raise MemoryError('Array {} is not on this chip.'.format(a.name))
@@ -87,8 +89,8 @@ class Chip(object):
           l = len(self.module_list)
           module = self.module(use_port, [], 'auto_module_{}'.format(l))
           self.current_module = module
-          func(self, *args, **kwargs)
-          self.check_onchip(self.array_accessed)
+          ans = func(self, *args, **kwargs)
+          self._check_onchip(self.array_accessed)
 
           module.array_list = self.array_accessed
           self.current_module = None
@@ -99,10 +101,11 @@ class Chip(object):
             raise RuntimeError('Attempt to use the port in a module that does not own the port.')
 
           # Execute and check whether all arrays belong to the module
-          func(self, *args, **kwargs)
+          ans = func(self, *args, **kwargs)
           for a in self.array_accessed:
             if a not in self.current_module.array_list:
               raise RuntimeError('Array {} is not in the current module.'.format(a.name))
+        return ans
       return inner
     return wrapper
 
@@ -133,8 +136,12 @@ class Chip(object):
       onchip_array.data[onchip_offset:onchip_offset + num]
 
   @_require_module(False)
-  def compute(self, dst: ChipArray, value: float):
-    dst.data[0] = value
+  def get_item(self, a: ChipArray, index: int) -> float:
+    self.set_array_mode(a, ChipArray.COMPUTE)
+    return a.data[index]
+
+  @_require_module(False)
+  def compute(self, value: float):
     return value
 
   @_require_module(False)
@@ -144,6 +151,7 @@ class Chip(object):
     return value
 
   def module(self, use_port: bool, array_list: list, name: str=''):
+    self._check_onchip(array_list)
     module = ChipModule(self, use_port, array_list, name)
     self.module_list.append(module)
     return module
@@ -162,17 +170,16 @@ class ChipModule(object):
   def __init__(self, chip: Chip, use_port: bool, array_list: list, name: str):
     self.chip = chip
     self.name = name
+    self.cycles = 0
     if use_port:
       if self.chip.port_owner is not None:
         raise RuntimeError('There is only one port between on-chip and off-chip.')
       self.chip.port_owner = self
 
     self.array_list = array_list
-    self.chip.check_onchip(array_list)
     for a in self.array_list:
       if a.mode != ChipArray.UNUSED:
         raise RuntimeError('Array {} belongs to multiple modules.'.format(a.name))
-
 
   def __enter__(self):
     assert(self.chip.current_module is None)
@@ -180,3 +187,8 @@ class ChipModule(object):
 
   def __exit__(self, exc_type, exc_val, exc_tb):
     self.chip.current_module = None
+    # Auto remove unused arrays
+    for a in self.array_list:
+      if a.mode == ChipArray.UNUSED:
+        sys.stderr.write('Warning: Array {} is unused in module {}.\n'.format(a.name, self.name))
+        self.array_list.remove(a)

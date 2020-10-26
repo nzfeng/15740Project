@@ -51,12 +51,16 @@ def main():
   # Computation
   with chip.module(False, [row_ptr, column_index, values, x, y], 'compute'):
     for i in range(num_rows):
-      y0 = chip.register(0.0)
-      y1 = chip.register(0.0)
-      for j in range(int(row_ptr[i]), int(row_ptr[i + 1])):
-        chip.compute(y1, values[j] * x[int(column_index[j])])
-        chip.compute(y0, y0[0] + y1[0])
-      chip.compute_array(y, i, y0[0])
+      y0 = 0
+      up = chip.get_item(row_ptr, i + 1)
+      down = chip.get_item(row_ptr, i)
+      for j in range(int(down), int(up)):
+        vj = chip.get_item(values, j)
+        idx = chip.get_item(column_index, j)
+        xi = chip.get_item(x, int(idx))
+        y1 = chip.compute(vj * xi)
+        y0 = chip.compute(y0 + y1)
+      chip.compute_array(y, i, y0)
 
   chip.join()
 
