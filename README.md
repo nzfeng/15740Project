@@ -7,18 +7,17 @@ All the components below are independent to each other and can work in parallel:
 - **DSP:** DSP is the function unit that performs floating point computation. The chip has `D` DSPs which can work in parallel. Each floating point computation takes `C` cycles.
 - **Memory:** Memory is separated into on-chip and off-chip memory. Data must be read onto the chip before it can be used by DSPs. Reading `k` bytes from off-chip to on-chip needs `A + B * k` cycles, where `A` and `B` are constants. The size of the on-chip memory is `M` bytes. The off-chip memory is infinitely large. **On-chip memory is not initialized to zero!**
 - **Arrays:** To use the on-chip memory, construct on-chip arrays. DSPs can directly access on-chip arrays taking no cycle (it's already included in the `C` cycles).
-- **Register:** You can also use as many registers as you want without spending on-chip memory.
 - **Ports:** There is only one read-write port between on-chip and off-chip. For simplicity, assume that there are an infinite number of read-write ports between the on-chip memory and DSPs (in practice we need to partition the array into different banks, each of which has its own read-write port).
 
 
 ## Chip Operations
-- `chip = Chip(...)`: Construct a chip
-- `onchip_array = chip.array(num, name)`: Allocate an on-chip float array of `num` items. Use `onchip_array[i]` to access the items in the array.
-- `r = chip.register(init_value)`: Construct a register with an initial value. Use `r[0]` to access the value of the register.
-- `chip.read(onchip_array, onchip_offset, offchip_array, offchip_offset, num)`: Copy a chunk of float data from off-chip to on-chip. Takes `A + B * (4 * num)` cycles.
-- `chip.write(onchip_array, onchip_offset, offchip_array, offchip_offset, num)`: Copy a chunk of float data from on-chip to off-chip. Takes `A + B * (4 * num)` cycles.
-- `chip.compute(dst, value)`: Use a DSP to compute the value and copy the value to a register.
-- `chip.compute_array(dst_array, dst_offset, value)`: Use a DSP to compute the value and copy the value to an on-chip array.
+- `chip = Chip(...)`: Constructs a chip
+- `onchip_array = chip.array(num, name)`: Allocates an on-chip float array of `num` items. Use `get_item()` to access the items in the array.
+- `chip.read(onchip_array, onchip_offset, offchip_array, offchip_offset, num)`: Copies a chunk of float data from off-chip to on-chip. Takes `A + B * (4 * num)` cycles.
+- `chip.write(onchip_array, onchip_offset, offchip_array, offchip_offset, num)`: Copies a chunk of float data from on-chip to off-chip. Takes `A + B * (4 * num)` cycles.
+- `chip.get_item(onchip_array, index)`: Returns `onchip_array[index]`. Uses no DSP but takes some cycles for indexing.
+- `chip.compute(value)`: Returns the same value, but uses one DSP to compute.
+- `chip.compute_array(dst_array, dst_offset, value)`: Uses one DSP to compute the value and copies the value to an on-chip array.
 
 ## Modules
 A module consists of an array of operations which run *sequentially*. Multiple modules run *in parallel* until they meet the `chip.join()` function.
