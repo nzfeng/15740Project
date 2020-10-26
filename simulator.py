@@ -18,17 +18,12 @@ class ChipArray(object):
     raise RuntimeError('Cannot access an array item directly. Must use Chip.get_item()')
 
 
-class ChipRegister(object):
-  def __init__(self, init_value: float):
-    self.data = init_value
-
-
-
 class Chip(object):
-  def __init__(self, dsp_num: int, dsp_cycle: int, mem_size: int,
-               mem_overhead: int, mem_unit: float):
+  def __init__(self, dsp_num: int, dsp_cycle: int, index_cycle: int,
+               mem_size: int, mem_overhead: int, mem_unit: float):
     self.dsp_num = dsp_num
     self.dsp_cycle = dsp_cycle
+    self.index_cycle = index_cycle
     self.mem_num = mem_size // 4  # Float is 4 bytes
     self.mem_overhead = mem_overhead
     self.mem_unit = mem_unit
@@ -145,7 +140,7 @@ class Chip(object):
     return value
 
   @_require_module(False)
-  def compute_array(self, dst_array: ChipArray, dst_offset: int, value: float):
+  def array_write(self, dst_array: ChipArray, dst_offset: int, value: float):
     self.set_array_mode(dst_array, ChipArray.COMPUTE)
     dst_array.data[dst_offset] = value
     return value

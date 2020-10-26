@@ -10,6 +10,8 @@ def main():
                       help='Number of DSPs')
   parser.add_argument('--dsp_cycle', '-C', type=int,
                       help='Cycles a DSP takes for one flop')
+  parser.add_argument('--index_cycle', '-X', type=int,
+                      help='Cycles for array indexing')
   parser.add_argument('--mem_size', '-M', type=int,
                       help='Size of on-chip memory (in bytes)')
   parser.add_argument('--mem_overhead', '-A', type=int,
@@ -19,8 +21,8 @@ def main():
 
   args = parser.parse_args()
 
-  chip = Chip(args.dsp_num, args.dsp_cycle, args.mem_size,
-              args.mem_overhead, args.mem_unit)
+  chip = Chip(args.dsp_num, args.dsp_cycle, args.index_cycle,
+              args.mem_size, args.mem_overhead, args.mem_unit)
 
   # SPMV
   num_rows = 10
@@ -60,7 +62,7 @@ def main():
         xi = chip.get_item(x, int(idx))
         y1 = chip.compute(vj * xi)
         y0 = chip.compute(y0 + y1)
-      chip.compute_array(y, i, y0)
+      chip.array_write(y, i, y0)
 
   chip.join()
 
