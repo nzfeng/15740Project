@@ -35,6 +35,8 @@ class Chip(object):
     self.join_index = []
     self.auto_module_mode = False
 
+    self.array_accessed = []
+
   def array(self, num: int, name: str='') -> ChipArray:
     '''
     Allocate an on-chip array
@@ -67,29 +69,28 @@ class Chip(object):
         raise MemoryError('Array {} is not on this chip.'.format(a.name))
 
   def set_array_mode(self, a: ChipArray, mode: int):
+    assert(a not in self.array_accessed)
     if self.auto_module_mode and a.mode != ChipArray.UNUSED:
       raise RuntimeError('Array {} belongs to multiple modules.'.format(a.name))
     if a.mode not in [mode, ChipArray.UNUSED]:
       raise RuntimeError('Array {} used for multiple purposes.'.format(a.name))
     a.mode = mode
+    self.array_accessed.append(a)
 
   def _require_module(use_port: bool):
     def wrapper(func):
       def inner(self, *args, **kwargs):
+        self.array_accessed = []
         if self.current_module is None:
           # Construct a module for func. func needs to return the array_list
           self.auto_module_mode = True
           l = len(self.module_list)
           module = self.module(use_port, [], 'auto_module_{}'.format(l))
           self.current_module = module
-          array_list = func(self, *args, **kwargs)
-          self.check_onchip(array_list)
+          func(self, *args, **kwargs)
+          self.check_onchip(self.array_accessed)
 
-          l = len(array_list)
-          for i in range(l):
-            if array_list[i].mode != ChipArray.UNUSED:
-              raise RuntimeError('Array {}({}) used multiple times.'.format(array_list[i].name, i))
-          module.array_list = array_list
+          module.array_list = self.array_accessed
           self.current_module = None
           self.auto_module_mode = False
         else:
@@ -98,8 +99,8 @@ class Chip(object):
             raise RuntimeError('Attempt to use the port in a module that does not own the port.')
 
           # Execute and check whether all arrays belong to the module
-          array_list = func(self, *args, **kwargs)
-          for a in array_list:
+          func(self, *args, **kwargs)
+          for a in self.array_accessed:
             if a not in self.current_module.array_list:
               raise RuntimeError('Array {} is not in the current module.'.format(a.name))
       return inner
@@ -117,7 +118,6 @@ class Chip(object):
     self.set_array_mode(onchip_array, ChipArray.READ)
     onchip_array.data[onchip_offset:onchip_offset + num] = \
       offchip_array[offchip_offset:offchip_offset + num]
-    return [onchip_array]
 
   @_require_module(True)
   def write(self, onchip_array: ChipArray, onchip_offset: int,
@@ -131,17 +131,17 @@ class Chip(object):
     self.set_array_mode(onchip_array, ChipArray.WRITE)
     offchip_array[offchip_offset:offchip_offset + num] = \
       onchip_array.data[onchip_offset:onchip_offset + num]
-    return [onchip_array]
 
   @_require_module(False)
   def compute(self, dst: ChipArray, value: float):
     dst.data[0] = value
-    return []
+    return value
 
   @_require_module(False)
   def compute_array(self, dst_array: ChipArray, dst_offset: int, value: float):
+    self.set_array_mode(dst_array, ChipArray.COMPUTE)
     dst_array.data[dst_offset] = value
-    return [dst_array]
+    return value
 
   def module(self, use_port: bool, array_list: list, name: str=''):
     module = ChipModule(self, use_port, array_list, name)
