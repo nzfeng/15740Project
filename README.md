@@ -26,3 +26,9 @@ A module consists of an array of operations which run *sequentially*. Multiple m
 - `chip.join()`: Join all active modules and update the number of cycles. This method separates the code into blocks. Modules in the same block run in parallel. Modules in different blocks never run at the same time. *Remember to call this method when all operations are done.*
 
 The best approach is to **put all operations into modules**. If an operation does not belong to any module, an auto module will be created for this single operation.
+
+## Example
+`main.py` contains an example of SPMV. Run this example with the following command:
+```
+python main.py -A 1 -B 0.1 -C 1 -D 1 -M 100000
+```
