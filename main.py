@@ -42,16 +42,17 @@ def main():
   offchip_x = np.random.randn(n)
 
   # Read inputs onto chip
-  with chip.module(True, [row_ptr, column_index, values, x], 'read_inputs'):
+  def f_read_inputs():
     chip.read(row_ptr, 0, offchip_row_ptr, 0, 11)
     chip.read(column_index, 0, offchip_column_index, 0, 100)
     chip.read(values, 0, offchip_values, 0, 100)
     chip.read(x, 0, offchip_x, 0, n)
 
-  chip.join()
+  read_inputs = chip.module(True, [row_ptr, column_index, values, x], 'read_inputs',
+                            f_read_inputs)
 
   # Computation
-  with chip.module(False, [row_ptr, column_index, values, x, y], 'compute'):
+  def f_compute():
     for i in range(num_rows):
       y0 = 0
       up = chip.get_item(row_ptr, i + 1)
@@ -64,14 +65,22 @@ def main():
         y0 = chip.compute(y0 + y1)
       chip.array_write(y, i, y0)
 
-  chip.join()
+  compute = chip.module(False, [row_ptr, column_index, values, x, y], 'compute',
+                        f_compute)
 
   # Write the result
   offchip_y = np.zeros((num_rows,), dtype=float)
-  with chip.module(True, [y], 'write_out'):
+  def f_write_out():
     chip.write(y, 0, offchip_y, 0, num_rows)
+  write_out = chip.module(True, [y], 'write_out', f_write_out)
 
-  chip.join()  # Call at the end to update cycles
+  # Run the program
+  read_inputs()
+  chip.join()
+  compute()
+  chip.join()
+  write_out()
+  chip.join()
 
   # Check result
   correct_y = np.zeros((num_rows,), dtype=float)
