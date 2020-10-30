@@ -13,6 +13,7 @@ class ChipArray(object):
     self.name = name
     self.data = np.random.randn(num)
     self.mode = ChipArray.UNUSED
+    self.module_owner = None
 
   def __getitem__(self, index):
     raise RuntimeError('Cannot access an array item directly. Must use Chip.get_item()')
@@ -37,7 +38,7 @@ class Chip(object):
     self.join_index = []
     self.auto_module_mode = False
 
-    self.array_accessed = []
+    self.array_accessed = [] # Arrays accessed by the current method
 
   def array(self, num: int, name: str='') -> ChipArray:
     '''
@@ -66,7 +67,6 @@ class Chip(object):
         raise MemoryError('Array {} is not on this chip.'.format(a.name))
 
   def set_array_mode(self, a: ChipArray, mode: int):
-    assert(a not in self.array_accessed)
     if self.auto_module_mode and a.mode != ChipArray.UNUSED:
       raise RuntimeError('Array {} belongs to multiple modules.'.format(a.name))
     if a.mode not in [mode, ChipArray.UNUSED]:
@@ -79,11 +79,13 @@ class Chip(object):
       def inner(self, *args, **kwargs):
         self.array_accessed = []
         if self.current_module is None:
-          # Construct a module for func. func needs to return the array_list
+          # Construct an auto module for func.
           self.auto_module_mode = True
           l = len(self.module_list)
           module = self.module(use_port, [], 'auto_module_{}'.format(l))
           self.current_module = module
+          if use_port and self.port_owner is not None:
+            raise RuntimeError('Multiple modules attempt to use the port at the same time.')
           ans = func(self, *args, **kwargs)
           self._check_onchip(self.array_accessed)
 
@@ -92,8 +94,13 @@ class Chip(object):
           self.auto_module_mode = False
         else:
           # Check the port
-          if use_port and self.port_owner != self.current_module:
-            raise RuntimeError('Attempt to use the port in a module that does not own the port.')
+          if use_port:
+            if not self.current_module.use_port:
+              raise RuntimeError('Attempt to use the port in a module that does not own the port.')
+            if self.port_owner is None:
+              self.port_owner = self.current_module
+            elif self.port_owner != self.current_module:
+              raise RuntimeError('Multiple modules attempt to use the port at the same time.')
 
           # Execute and check whether all arrays belong to the module
           ans = func(self, *args, **kwargs)
@@ -145,9 +152,9 @@ class Chip(object):
     dst_array.data[dst_offset] = value
     return value
 
-  def module(self, use_port: bool, array_list: list, name: str=''):
+  def module(self, use_port: bool, array_list: list, name: str, func):
     self._check_onchip(array_list)
-    module = ChipModule(self, use_port, array_list, name)
+    module = ChipModule(self, use_port, array_list, name, func)
     self.module_list.append(module)
     return module
 
@@ -157,33 +164,29 @@ class Chip(object):
     self.port_owner = None
     for a in self.array_list:
       a.mode = ChipArray.UNUSED
+      a.module_owner = None
     # Update cycles
     # TODO
 
 
 class ChipModule(object):
-  def __init__(self, chip: Chip, use_port: bool, array_list: list, name: str):
+  def __init__(self, chip: Chip, use_port: bool, array_list: list, name: str, func):
     self.chip = chip
     self.name = name
     self.cycles = 0
-    if use_port:
-      if self.chip.port_owner is not None:
-        raise RuntimeError('There is only one port between on-chip and off-chip.')
-      self.chip.port_owner = self
-
+    self.func = func
+    self.use_port = use_port
     self.array_list = array_list
-    for a in self.array_list:
-      if a.mode != ChipArray.UNUSED:
-        raise RuntimeError('Array {} belongs to multiple modules.'.format(a.name))
 
-  def __enter__(self):
-    assert(self.chip.current_module is None)
+  def __call__(self, *args, **kwargs):
+    assert (self.chip.current_module is None)
     self.chip.current_module = self
-
-  def __exit__(self, exc_type, exc_val, exc_tb):
-    self.chip.current_module = None
-    # Auto remove unused arrays
     for a in self.array_list:
-      if a.mode == ChipArray.UNUSED:
-        sys.stderr.write('Warning: Array {} is unused in module {}.\n'.format(a.name, self.name))
-        self.array_list.remove(a)
+      if a.module_owner is not None:
+        raise RuntimeError('Two modules that own array {} ({} and {}) run at the '
+                           'same time.'.format(a.name, a.module_owner, self.name))
+      a.module_owner = self.name
+    ans = self.func(*args, **kwargs)
+
+    self.chip.current_module = None
+    return ans

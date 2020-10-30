@@ -21,7 +21,7 @@ All the components below are independent to each other and can work in parallel:
 
 ## Modules
 A module consists of an array of operations which run *sequentially*. Multiple modules run *in parallel* until they meet the `chip.join()` function.
-- `chip.module(use_port, array_list, name)`: Construct a module. The module can access the port between on-chip and off-chip if `use_port = True`. Only one module can access the port at any given time. `array_list` is the list of on-chip arrays the module can access. Any on-chip array can only be accessed by one module at any given time.
+- `module = chip.module(use_port, array_list, name, func)`: Construct a module that runs the function `func`. Call this module with `ans = module(...)`. The module can access the port between on-chip and off-chip if `use_port = True`. Only one module can access the port at any given time. `array_list` is the list of on-chip arrays the module can access. Any on-chip array can only be accessed by one module at any given time.
 - `chip.join()`: Join all active modules and update the number of cycles. This method separates the code into blocks. Modules in the same block run in parallel. Modules in different blocks never run at the same time. *Remember to call this method when all operations are done.*
 
 The best approach is to **put all operations into modules**. If an operation does not belong to any module, an auto module will be created for this single operation.
