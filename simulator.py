@@ -1,4 +1,5 @@
 import numpy as np
+import math
 import sys
 
 
@@ -35,10 +36,12 @@ class Chip(object):
 
     self.current_module = None
     self.module_list = []
-    self.join_index = []
-    self.auto_module_mode = False
-
     self.array_accessed = [] # Arrays accessed by the current method
+
+    # For analysis
+    self.verbose = False
+    self.module_history = []
+    self.join_index = []
 
   def array(self, num: int, name: str='') -> ChipArray:
     '''
@@ -66,47 +69,45 @@ class Chip(object):
       if not self._is_onchip(a):
         raise MemoryError('Array {} is not on this chip.'.format(a.name))
 
+  def _add_cycles(self, cycles: int):
+    self.current_module.cycles += cycles
+
   def set_array_mode(self, a: ChipArray, mode: int):
-    if self.auto_module_mode and a.mode != ChipArray.UNUSED:
+    if not self._is_onchip(a):
+      raise MemoryError('Array {} is not on this chip.'.format(a.name))
+    if a.module_owner is None:
+      if a.mode not in [mode, ChipArray.UNUSED]:
+        raise RuntimeError('Array {} used for multiple purposes.'.format(a.name))
+      a.mode = mode
+      a.module_owner = self.current_module
+      self.array_accessed.append(a)
+    elif a.module_owner != self.current_module:
       raise RuntimeError('Array {} belongs to multiple modules.'.format(a.name))
-    if a.mode not in [mode, ChipArray.UNUSED]:
-      raise RuntimeError('Array {} used for multiple purposes.'.format(a.name))
-    a.mode = mode
-    self.array_accessed.append(a)
 
   def _require_module(use_port: bool):
     def wrapper(func):
       def inner(self, *args, **kwargs):
         self.array_accessed = []
+        p = False
         if self.current_module is None:
           # Construct an auto module for func.
-          self.auto_module_mode = True
           l = len(self.module_list)
           module = self.module(use_port, [], 'auto_module_{}'.format(l))
           self.current_module = module
-          if use_port and self.port_owner is not None:
+          ans = func(self, *args, **kwargs)
+          p = True
+
+        ans = func(self, *args, **kwargs)
+        # Check the port
+        if use_port:
+          if self.port_owner is None:
+            self.port_owner = self.current_module
+            self.current_module.use_port = True
+          elif self.port_owner != self.current_module:
             raise RuntimeError('Multiple modules attempt to use the port at the same time.')
-          ans = func(self, *args, **kwargs)
-          self._check_onchip(self.array_accessed)
-
-          module.array_list = self.array_accessed
+        self.current_module.array_list.extend(self.array_accessed)
+        if p:
           self.current_module = None
-          self.auto_module_mode = False
-        else:
-          # Check the port
-          if use_port:
-            if not self.current_module.use_port:
-              raise RuntimeError('Attempt to use the port in a module that does not own the port.')
-            if self.port_owner is None:
-              self.port_owner = self.current_module
-            elif self.port_owner != self.current_module:
-              raise RuntimeError('Multiple modules attempt to use the port at the same time.')
-
-          # Execute and check whether all arrays belong to the module
-          ans = func(self, *args, **kwargs)
-          for a in self.array_accessed:
-            if a not in self.current_module.array_list:
-              raise RuntimeError('Array {} is not in the current module.'.format(a.name))
         return ans
       return inner
     return wrapper
@@ -123,6 +124,7 @@ class Chip(object):
     self.set_array_mode(onchip_array, ChipArray.READ)
     onchip_array.data[onchip_offset:onchip_offset + num] = \
       offchip_array[offchip_offset:offchip_offset + num]
+    self._add_cycles(math.ceil(self.mem_overhead + self.mem_unit * 4 * num))
 
   @_require_module(True)
   def write(self, onchip_array: ChipArray, onchip_offset: int,
@@ -136,57 +138,72 @@ class Chip(object):
     self.set_array_mode(onchip_array, ChipArray.WRITE)
     offchip_array[offchip_offset:offchip_offset + num] = \
       onchip_array.data[onchip_offset:onchip_offset + num]
+    self._add_cycles(math.ceil(self.mem_overhead + self.mem_unit * 4 * num))
 
   @_require_module(False)
   def get_item(self, a: ChipArray, index: int) -> float:
     self.set_array_mode(a, ChipArray.COMPUTE)
+    self._add_cycles(self.index_cycle)
     return a.data[index]
 
   @_require_module(False)
   def compute(self, value: float):
+    self._add_cycles(self.dsp_cycle)
     return value
 
   @_require_module(False)
   def array_write(self, dst_array: ChipArray, dst_offset: int, value: float):
     self.set_array_mode(dst_array, ChipArray.COMPUTE)
     dst_array.data[dst_offset] = value
+    self._add_cycles(self.index_cycle)
     return value
 
-  def module(self, use_port: bool, array_list: list, name: str, func):
-    self._check_onchip(array_list)
-    module = ChipModule(self, use_port, array_list, name, func)
+  def module(self, func, name: str=''):
+    # self._check_onchip(array_list)
+    module = ChipModule(self, name, func)
     self.module_list.append(module)
     return module
 
+  def enter_module(self, module):
+    self.current_module = module
+
+  def exit_module(self):
+    self.current_module = None
+
   def join(self):
-    self.join_index.append(len(self.module_list))
     # Recover the port and arrays
     self.port_owner = None
     for a in self.array_list:
       a.mode = ChipArray.UNUSED
       a.module_owner = None
+    for m in self.module_list:
+      # Debug
+      # print('Module: {}'.format(m.name))
+      # print('Use port: {}'.format(m.use_port))
+      # for a in m.array_list:
+      #   print(a.name)
+
+      m.use_port = False
+      m.array_list = []
+      m.cycles = 0
     # Update cycles
     # TODO
+    self.join_index.append(len(self.module_history))
+
 
 
 class ChipModule(object):
-  def __init__(self, chip: Chip, use_port: bool, array_list: list, name: str, func):
+  def __init__(self, chip: Chip, name: str, func):
     self.chip = chip
     self.name = name
     self.cycles = 0
     self.func = func
-    self.use_port = use_port
-    self.array_list = array_list
+    self.use_port = False
+    self.array_list = []
 
   def __call__(self, *args, **kwargs):
     assert (self.chip.current_module is None)
-    self.chip.current_module = self
-    for a in self.array_list:
-      if a.module_owner is not None:
-        raise RuntimeError('Two modules that own array {} ({} and {}) run at the '
-                           'same time.'.format(a.name, a.module_owner, self.name))
-      a.module_owner = self.name
+    self.chip.enter_module(self)
     ans = self.func(*args, **kwargs)
-
-    self.chip.current_module = None
+    self.chip.exit_module()
     return ans
