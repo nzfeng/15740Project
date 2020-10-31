@@ -48,8 +48,7 @@ def main():
     chip.read(values, 0, offchip_values, 0, 100)
     chip.read(x, 0, offchip_x, 0, n)
 
-  read_inputs = chip.module(True, [row_ptr, column_index, values, x], 'read_inputs',
-                            f_read_inputs)
+  read_inputs = chip.module(f_read_inputs, 'read_inputs')
 
   # Computation
   def f_compute():
@@ -65,14 +64,13 @@ def main():
         y0 = chip.compute(y0 + y1)
       chip.array_write(y, i, y0)
 
-  compute = chip.module(False, [row_ptr, column_index, values, x, y], 'compute',
-                        f_compute)
+  compute = chip.module(f_compute, 'compute')
 
   # Write the result
   offchip_y = np.zeros((num_rows,), dtype=float)
   def f_write_out():
     chip.write(y, 0, offchip_y, 0, num_rows)
-  write_out = chip.module(True, [y], 'write_out', f_write_out)
+  write_out = chip.module(f_write_out, 'write_out')
 
   # Run the program
   read_inputs()
