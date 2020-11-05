@@ -28,9 +28,10 @@ def isCorrect(W, a, b):
 	    True if multiplication checks out, False otherwise
 	'''
 	epsilon = 1e-5
-	valid = np.zeros((MV_dim), dtype=float)
-	for i in range(MV_dim):
-		for j in range(MV_dim):
+	[rows, cols] = np.shape(W)
+	valid = np.zeros(rows)
+	for i in range(rows):
+		for j in range(cols):
 			valid[i] += W[i,j]*a[j]
 		if (abs(valid[i] - b[i]) > epsilon):
 			return False
@@ -83,6 +84,7 @@ def matrixToCSC(M : np.ndarray):
 	v = np.asarray(v)
 	z = np.asarray(z)
 	p = np.asarray(p)
+
 	return [v, z, p]
 
 
@@ -101,8 +103,17 @@ def main():
 		help='Overhead of read-write port')
 	parser.add_argument('--mem_unit', '-B', type=float,
 		help='Cycles for reading 1 byte from the port')
+	parser.add_argument('--matrix_size', '-MV_dim', type=float,
+		help='Maximum dimension of matrix/vector')
+	parser.add_argument('--sparsity', '-density', type=float,
+		help='Density of the weight matrix W and initial input vector')
+	parser.add_argument('--PE_num', '-PE_num', type=float,
+		help='Number of PEs')
 
 	args = parser.parse_args()
+	MV_dim = int(args.matrix_size)
+	sparsity = args.sparsity
+	num_PE = int(args.PE_num)
 
 	chip = Chip(args.dsp_num, args.dsp_cycle, args.index_cycle,
 		args.mem_size, args.mem_overhead, args.mem_unit)
@@ -114,7 +125,7 @@ def main():
 	a = random(MV_dim, 1, density=sparsity, dtype=float)
 	a = a.A
 	b = np.zeros((MV_dim, 1), dtype=float) # will hold final computed result
-
+	#print(W)
 	X = np.zeros(num_PE) # encodes location of nonzero elements in input vector
 
 	# A list of v, z, p vectors (CSC representations) for each portion of W in 
@@ -161,8 +172,9 @@ def main():
 			# (consider breaking this out into another function)
 			chip.read(A, num_rows*k, [a[i] for i in range(k, MV_dim, num_PE)], 0, num_rows)
 			# Initialize output array into which results will be accumulated.
-			chip.read(B, 0, np.zeros(MV_dim), 0, num_rows)
+			chip.read(B, 0, np.zeros(MV_dim), 0, MV_dim)
 		chip.read(offsets, 0, offset_vec, 0, num_PE)
+
 
 	def f_LNZD(j):
 		'''
@@ -182,16 +194,15 @@ def main():
 
 		# X has length = num_PE = num_LNZD.
 		for k in range(num_PE): # to be unrolled
-			if (chip.get_item(A, k*num_PE + j) != 0):
+			if (chip.get_item(A, k*num_rows + j) != 0):
 				X[k] = 1
-		print(X)
 
 	def f_broadcast(j):
 
 		for k in range(num_PE):
 			if (X[k] > 0):
-				chip.array_write(AJ, 0, j*num_PE + k)
-				chip.array_write(AV, 0, chip.get_item(A, k*num_PE+ j))
+				chip.array_write(AJ, 0, j*num_PE+k) # index in the original
+				chip.array_write(AV, 0, chip.get_item(A, k*num_rows + j))
 				X[k] = 0
 				return True	
 		# X should be all zero again
@@ -206,7 +217,6 @@ def main():
 		# Get the next element of a from the activation queue.
 		a_j = chip.get_item(AV, 0)
 		j = (chip.get_item(AJ, 0)).astype(int)
-		print(a_j, j)
 
 		for k in range(num_PE): # to be unrolled
 			# Multiply every element of W in column j with a.
@@ -215,10 +225,11 @@ def main():
 			col_end = (chip.get_item(P, (MV_dim+1)*k+(j+1))).astype(int)
 			for i in range(col_start, col_end):
 				w_ij = chip.get_item(V, offset+i)
-				z = (chip.get_item(Z, offset+i)).astype(int) # row index
-				b_i = chip.get_item(B, k*num_PE+z)
-				res = chip.compute(b_i + w_ij*a_j)
-				chip.array_write(B, k*num_PE+z, res)
+				z = (chip.get_item(Z, offset+i)).astype(int) # relative row index
+				b_i = chip.get_item(B, k*num_rows+z)
+				add = chip.compute(w_ij*a_j)
+				res = chip.compute(b_i + add)
+				chip.array_write(B, k*num_rows+z, res)
 
 
 	def f_writeOutput():
@@ -228,7 +239,7 @@ def main():
 	    # that case, PEs will have more uneven balance of work.
 	    for k in range(num_PE):
 		    for i in range(num_rows):
-		    	chip.write(B, k*num_rows+i, b[k+i*num_PE], 0, 1) 
+		    	chip.write(B, k*num_rows+i, b[num_PE*i+k], 0, 1) 
 
 
 	readInput = chip.module(f_readInput, 'read')
@@ -251,6 +262,7 @@ def main():
 	chip.join()
 
 	# Make sure EIE performed SPMV correctly.
+	#print(b)
 	#print(np.matmul(W,a))
 	print("SPMV %s" %isCorrect(W, a, b))
 
