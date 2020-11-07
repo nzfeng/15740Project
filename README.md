@@ -30,10 +30,17 @@ A module consists of an array of operations which run *sequentially*. Multiple m
 The best approach is to **put all operations into modules**. If an operation does not belong to any module, an auto module will be created for this single operation.
 
 ## Loop Unrolling
-
+- `chip.unrolled_loop(n, f)`: Fully unroll a loop that iterates `n` times. The function `f` takes an argument `idx`, which is its index in the loop.
 
 ## Example
-`main.py` contains an example of SPMV. Run this example with the following command:
+
+`EIE.py` contains the implementation of EIE. Run this example with the following command:
 ```
-python main.py -A 1 -B 0.1 -C 1 -X 1 -D 1 -M 100000
+python EIE.py -A 1 -B 0.01 -C 1 -D 100 -M 10000000 -X 1 -P 4 -n 8 -s 0.5
+```
+
+
+`spmv.py` contains an example of SPMV. Run this example with the following command:
+```
+python spmv.py -A 1 -B 0.1 -C 1 -X 1 -D 1 -M 100000
 ```
