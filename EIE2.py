@@ -286,21 +286,34 @@ def main():
 
   ########################
   # Chip code starts here
-  read_x()
-  chip.join()
+  # #1: Test module group
+  with chip.module_group('read_x_mg1'):
+    with chip.module_group('read_x_mg2:'):
+      read_x()
+      chip.join() #mg2
+    print('read_x_mg2 exit')
+    chip.join() #mg1
+  print('read_x_mg1 exit')
+  chip.join() #chip
   read_w()
-  chip.join()
+  chip.join() #chip
   for k in range(num_PE):
     B[k].clear()
-  LNZD()
-  chip.join()
+  with chip.module_group('lnzd_mg1'):
+    LNZD()
+    chip.join() #mg1
+  chip.join() #chip
   while not LNZD.S:  # LNZD.S is a global signal
     # LNZD and PE work in parallel
-    LNZD()
-    PE()
-    chip.join()
+    with chip.module_group('compute_mg1'):
+      LNZD()
+      with chip.module_group('pe_mg1'):
+        PE()
+        chip.join() #pe
+      chip.join() #compute
+    chip.join() #chip
   write_out()
-  chip.join()
+  chip.join() #chip
   b = np.transpose(b).flatten()
   b = b[:n_row]
 
@@ -308,6 +321,7 @@ def main():
   eps = 1e-6
   assert(max(abs(np.matmul(W, a) - b)) < eps)
   print('Pass')
+  chip.verbose = True 
   chip.print_summary()
 
 

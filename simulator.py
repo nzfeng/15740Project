@@ -64,6 +64,9 @@ class Chip(object):
     self.ff_list = []
     self.dsp_list = []
 
+    # #1: Module group stack
+    self.module_group_stack = []
+
     # For analysis
     self.verbose = False
     self.module_history = []
@@ -235,7 +238,7 @@ class Chip(object):
     self.current_module = module
 
   def exit_module(self):
-    self.module_history.append((self.current_module.name, self.current_module.cycles))
+    self.module_history.append((self.current_module, self.current_module.cycles))
     # print(self.current_module.name)
     # print(self.current_module.cycles)
     self.current_module = None
@@ -266,44 +269,121 @@ class Chip(object):
     Flips all flip-flops
     Resets all ports
     '''
-    # Recover the port
-    self.port_owner = None
 
-    # Recover the arrays
-    for a in self.array_list:
-      a.mode = ChipArray.UNUSED
-      a.module_owner = None
+    if len(self.module_group_stack) == 0:
+      # Not in a module group
+      # Recover the port
+      self.port_owner = None
 
-    # Flip the flip-flops
-    for ff in self.ff_list:
-      ff.flip()
+      # Recover the arrays
+      for a in self.array_list:
+        a.mode = ChipArray.UNUSED
+        a.module_owner = None
 
-    # Recover the modules
-    for m in self.module_list:
-      m.use_port = False
-      m.array_list = []
-      m.cycles = 0
-    # Update cycles
-    l0 = 0 if len(self.join_index) == 0 else self.join_index[-1]
-    l1 = len(self.module_history)
-    self.join_index.append(l1)
+      # Flip the flip-flops
+      for ff in self.ff_list:
+        ff.flip()
 
-    cycles = 0
-    for i in range(l0, l1):
-      cycles = max(cycles, self.module_history[i][1])
-    self.cycles += cycles
+      # Recover the modules
+      for m in self.module_list:
+        m.use_port = False
+        m.array_list = []
+        m.cycles = 0
 
-  def print_summary(self):
-    l0 = 0
-    for l1 in self.join_index:
+      # Update cycles
+      l0 = 0 if len(self.join_index) == 0 else self.join_index[-1]
+      l1 = len(self.module_history)
+      self.join_index.append(l1)
       cycles = 0
       for i in range(l0, l1):
-        print('Module: {}\tCycles: {}'.format(self.module_history[i][0], self.module_history[i][1]))
         cycles = max(cycles, self.module_history[i][1])
-      print('+ Block Cycles: {}'.format(cycles))
-      print('==================')
+      self.cycles += cycles
+    else:
+      # #1: In a module group, mg = innermost module group
+      mg = self.module_group_stack[-1]
+
+      # Recover the port, and write mg.use_port
+      if self.port_owner is not None:
+        mg.use_port = True
+      self.port_owner = None
+
+      # Check newly visited modules (mg.mi to l are new modules)
+      # Also recover modules, and update mg.join_index
+      l = len(self.module_history)
+      array_accessed = []
+      k = mg.mi
+      while k < l:
+        m = self.module_history[k]
+        mg.module_history.append(m)  # insert into mg.module_history
+        m = m[0] # m = the module
+        k += 1
+        for a in m.array_list:
+          if a not in array_accessed:
+            array_accessed.append(a)
+        # Recover module m
+        m.use_port = False
+        m.array_list = []
+        m.cycles = 0
+      mg.join_index.append(len(mg.module_history))  # update join_index
+
+      # Update cycles (only mg.cycles, not self.cycles)
+      cycles = 0
+      for i in range(mg.mi, l):
+        cycles = max(cycles, self.module_history[i][1])
+      mg.cycles += cycles
+      mg.mi = l
+
+      # Recover arrays and update mg.array_list
+      for a in array_accessed:
+        # Recover array a
+        a.mode = ChipArray.UNUSED
+        a.module_owner = None
+        # Add a to mg.array_list
+        if a not in mg.array_list:
+          mg.array_list.append(a)
+
+      # Flip the flip-flops (#1: might have problems here)
+      for ff in self.ff_list:
+        ff.flip()
+
+  def module_group(self, name: str):
+    return ChipModuleGroup(self, name)
+
+  def push_module_group(self, mg):
+    self.module_group_stack.append(mg)
+
+  def pop_module_group(self, mg):
+    assert self.module_group_stack[-1] == mg
+    self.module_group_stack = self.module_group_stack[:-1]
+
+  def read_cycles(self):
+    # #1: must use this function to access self.cycles
+    assert self.join_index[-1] == len(self.module_history) # cannot read before join
+    return self.cycles
+
+  def print_summary(self):
+    Chip._print_summary(self, 0 if self.verbose else -1)
+
+  @staticmethod
+  def _print_summary(mg, n: int):
+    # #1
+    # mg can be a chip or a module group
+    # n = -1 then not verbose
+    l0 = 0
+    for l1 in mg.join_index:
+      cycles = 0
+      for i in range(l0, l1):
+        print('{}Module: {}\tCycles: {}'.format(' ' * n * 4,
+                                                mg.module_history[i][0].name, mg.module_history[i][1]))
+        cycles = max(cycles, mg.module_history[i][1])
+        if n >= 0 and type(mg.module_history[i][0]) is ChipModuleGroup:
+          Chip._print_summary(mg.module_history[i][0], n + 1)
+      print('{}+ Block Cycles: {}'.format(' ' * n * 4, cycles))
+      print('{}=================='.format(' ' * n * 4))
       l0 = l1
-    print('Total Cycles: {}'.format(self.cycles))
+    if n == 0:
+      # assert mg is chip
+      print('Total Cycles: {}'.format(mg.read_cycles()))
 
 
 class ChipModule(object):
@@ -332,3 +412,43 @@ class ChipModule(object):
   def reset(self):
     if self.reset is not None:
       self.reset()
+
+
+# #1: Module group
+class ChipModuleGroup(object):
+  def __init__(self, chip: Chip, name: str):
+    self.chip = chip
+    self.name = name
+    self.cycles = 0
+    self.use_port = False
+    self.module_history = []
+    self.array_list = []
+    self.join_index = []
+    # All modules between mstart and mend are in this group
+    self.mstart = 0   # The # of modules when this group starts
+    self.mi = 0
+
+  def __enter__(self):
+    self.mstart = len(self.chip.module_history)
+    self.mi = self.mstart
+    self.chip.push_module_group(self)
+
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    # Check if joined correctly
+    assert self.join_index[-1] == len(self.chip.module_history) - self.mstart
+
+    # Recover arrays
+    for a in self.array_list:
+      a.module_owner = self
+
+    # Recover port
+    if self.use_port:
+      assert self.chip.port_owner is None
+      self.chip.port_owner = self
+
+    # Merge modules into the group
+    self.chip.module_history = self.chip.module_history[:self.mstart]
+    self.chip.module_history.append((self, self.cycles))
+
+    # Pop
+    self.chip.pop_module_group(self)

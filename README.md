@@ -32,6 +32,14 @@ The best approach is to **put all operations into modules**. If an operation doe
 ## Loop Unrolling
 - `chip.unrolled_loop(n, f)`: Fully unroll a loop that iterates `n` times. The function `f` takes an argument `idx`, which is its index in the loop.
 
+## Module Group
+Several modules can be merged into a module group. The module group acts like a module, and can run with other modules or module groups in parallel. `chip.join()` inside a module group only affects modules inside the group, but not those outside. To use module group, use:
+```python
+with chip.module_group('name'):
+  # write code here
+```
+Do not forget `chip.join()` at the end of the module group.
+
 ## Example
 
 `EIE.py` contains the implementation of EIE. Run this example with the following command:
