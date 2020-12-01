@@ -191,6 +191,7 @@ class Chip(object):
       onchip_array.data[onchip_offset:onchip_offset + num_per_array] = \
         in_array[i, :]
       i += 1
+    self._add_cycles(math.ceil(self.mem_overhead + self.mem_unit * 4 * num))
 
   @_require_module(True)
   def write(self, onchip_array: ChipArray, onchip_offset: int,
@@ -381,7 +382,7 @@ class Chip(object):
       print('{}+ Block Cycles: {}'.format(' ' * n * 4, cycles))
       print('{}=================='.format(' ' * n * 4))
       l0 = l1
-    if n == 0:
+    if n == 0 or n == -1:
       # assert mg is chip
       print('Total Cycles: {}'.format(mg.read_cycles()))
 

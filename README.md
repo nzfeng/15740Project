@@ -44,11 +44,10 @@ Do not forget `chip.join()` at the end of the module group.
 
 `EIE.py` contains the implementation of EIE. Run this example with the following command:
 ```
-python EIE.py -A 1 -B 0.01 -C 1 -D 100 -M 10000000 -X 1 -P 4 -n 8 -s 0.5
+python EIE.py -A 1 -B 0.01 -C 1 -D 100 -M 16777216 -X 1 -P 4 -n 8 -s 0.5
 ```
 
-
-`spmv.py` contains an example of SPMV. Run this example with the following command:
+`FC.py` contains the implementation of a fully-connected ReLU neural network. Run this example with the following command (16MB on-chip memory):
 ```
-python spmv.py -A 1 -B 0.1 -C 1 -X 1 -D 1 -M 100000
+python FC.py -A 1 -B 0.01 -C 1 -D 100 -M 16777216 -X 1 -P 4 -n 8 -s 0.5
 ```
