@@ -49,5 +49,10 @@ python EIE.py -A 1 -B 0.01 -C 1 -D 100 -M 16777216 -X 1 -P 4 -n 8 -s 0.5
 
 `FC.py` contains the implementation of a fully-connected ReLU neural network. Run this example with the following command (16MB on-chip memory):
 ```
-python FC.py -A 1 -B 0.01 -C 1 -D 100 -M 16777216 -X 1 -P 4 -n 8 -s 0.5
+python FC.py -A 1 -B 0.01 -C 1 -D 100 -M 16777216 -X 1 -P 4 -n 784,100,10 -s 0.5
+```
+
+`FC_mnist.py` runs the same implementation on the MNIST dataset. Weights and biases are saved in `mnist.pkl`. It contains a two-layer network with hidden layer dimension = 100.
+```
+python FC_mnist.py -A 1 -B 0.01 -C 1 -D 100 -M 16777216 -X 1 -P 4 -n 784,100,10
 ```

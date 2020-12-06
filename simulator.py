@@ -362,6 +362,13 @@ class Chip(object):
     assert self.join_index[-1] == len(self.module_history) # cannot read before join
     return self.cycles
 
+  def reset(self):
+    for m in self.module_list:
+      m.reset()
+    self.module_history = []
+    self.join_index = []
+    self.cycles = 0
+
   def print_summary(self):
     Chip._print_summary(self, 0 if self.verbose else -1)
 
@@ -393,7 +400,7 @@ class ChipModule(object):
     self.name = name
     self.cycles = 0
     self.func = func
-    self.reset = None
+    self.reset_func = None
     self.use_port = False
     self.array_list = []
 
@@ -408,11 +415,11 @@ class ChipModule(object):
     return ans
 
   def set_reset(self, func):
-    self.reset = func
+    self.reset_func = func
 
   def reset(self):
-    if self.reset is not None:
-      self.reset()
+    if self.reset_func is not None:
+      self.reset_func()
 
 
 # #1: Module group
