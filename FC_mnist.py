@@ -104,6 +104,8 @@ def main():
   parser.add_argument('--dims', '-n', type=str, required=True,
                       help='input_dim,layer1_out,...,layerk_out(output_dim)')
   parser.add_argument('--PE_num', '-P', type=int, help='Number of PEs')
+  parser.add_argument('--pkl_file', '-f', type=str,
+                      help='Model weights')
 
   args = parser.parse_args()
   num_PE = args.PE_num
@@ -286,7 +288,7 @@ def main():
 
   ########################
   # Read weights
-  with open('mnist.pkl', 'rb') as f:
+  with open(args.pkl_file, 'rb') as f:
     dat = pickle.load(f)
 
   dims = args.dims.split(',')
@@ -309,6 +311,7 @@ def main():
     # Create random sparse matrix W, and sparse vector a.
     # Portions of W are put into CSC format by CPU.
     W = dat[layer_i][0]
+    print('Sparsity = {}'.format((W != 0).sum() / len(W.flatten())))
     bi = dat[layer_i][1]
     bi_list.append(bi)
 

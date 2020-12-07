@@ -49,6 +49,7 @@ def main():
   parser.add_argument('--batch_size', '-b', type=int, default=256,
                       help='Batch size')
   parser.add_argument('--lr', type=float, default=0.1, help='Learning rate')
+  parser.add_argument('--save_file', '-f', type=str)
   args = parser.parse_args()
   sparsity = args.sparsity
   iterations = args.iterations
@@ -88,8 +89,8 @@ def main():
       fcs[j].weight.data *= m
     test(model, testloader)
 
-  p = [(fc.weight.data.numpy().transpose(), fc.bias.data.numpy()) for fc in fcs]
-  with open('mnist.pkl', 'wb') as f:
+  p = [(fc.weight.data.numpy(), fc.bias.data.numpy()) for fc in fcs]
+  with open(args.save_file, 'wb') as f:
     pickle.dump(p, f)
 
   # state = {'model': model.state_dict(),}
