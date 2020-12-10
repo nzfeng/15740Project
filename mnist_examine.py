@@ -6,7 +6,6 @@ import pickle
 
 def main():
 	parser = argparse.ArgumentParser()
-	parser.add_argument('--dsp_num', '-D', type=int, help='Number of DSPs')
 	parser.add_argument('--PE_num', '-P', type=int, help='Number of PEs')
 	parser.add_argument('--dims', '-n', type=str, required=True,
                       	help='input_dim,layer1_out,...,layerk_out(output_dim)')
@@ -24,6 +23,7 @@ def main():
 	for layer_i in range(len(dims) - 1):
 		X = "" # datapoints
 		W = dat[layer_i][0] # weight matrix
+		print(np.shape(W))
 		n_col = dims[layer_i]
 		n_row = dims[layer_i + 1]
 		num_rows = math.ceil(n_row / num_PE) # number of rows per PE
@@ -39,3 +39,5 @@ def main():
 
 if __name__ == '__main__':
 	main()
+
+# python3 mnist_examine.py -P 4 -n 784,100,10 -f ./models/mnist0.2.pkl
