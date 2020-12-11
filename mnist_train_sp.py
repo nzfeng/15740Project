@@ -38,6 +38,161 @@ def build_model(dims):
   return model, fcs, masks
 
 
+def prune_overall(sparsity, i, n_iter, fcs, masks, isIterative):
+  '''
+  In each layer, prune smallest (1-sparsity) of weights overall. 
+  If <isIterative> is true, prune iteratively.
+
+  i = current iteration
+  '''
+  ratio = sparsity ** (1 / n_iter)
+  l = len(fcs)
+  for j in range(l):
+    (n_rows, n_cols) = np.shape(masks[j]) 
+    print("n_rows: %d, n_cols: %d" %(n_rows, n_cols))
+    w = fcs[j].weight.data.abs() # abs. val. weight matrix
+    m = masks[j] # get corresponding mask for this matrix
+    n = (m > 0).sum() # n = number of nonzero elements
+    d = int(n * (1-sparsity)) # number of values to get rid of
+    if (isIterative):
+      d = int(n * (1-ratio))
+    if (not isIterative and i==0) or (isIterative):
+      p = w[m > 0].view(-1)
+      r = p.sort().values[d] # get the dth smallest value in the matrix
+      m[w < r] = 0 # update mask
+      masks[j] = m # update masks list
+      fcs[j].weight.data *= m # apply mask to weight matrix
+
+
+def prune_in(sparsity, i, n_iter, fcs, masks, isIterative):
+  '''
+  Prune by in-degree of each node (constrain number of non-zero elements per
+  row.)
+  '''
+  ratio = sparsity ** (1 / n_iter)
+  l = len(fcs)
+  for j in range(l):
+    (n_rows, n_cols) = np.shape(masks[j]) 
+    print("n_rows: %d, n_cols: %d" %(n_rows, n_cols))
+    w = fcs[j].weight.data.abs() # abs. val. weight matrix
+    m = masks[j] # get corresponding mask for this matrix
+    n = (m[0,:] > 0).sum() # n = number of nonzero elements per row
+    d = int(n * (1-sparsity)) # number of values to get rid of
+    if (isIterative):
+      d = int(n * (1 - ratio))
+
+    if (not isIterative and i==0) or (isIterative):
+      print(d)
+      for row in range(n_rows):
+        ps = w[row,:][m[row,:] > 0]
+        ps = ps.sort()
+        r = ps.values[d] # get the dth smallest value in the matrix
+        m[row,:][w[row,:] < r] = 0 # update mask
+
+    masks[j] = m # update masks list
+    fcs[j].weight.data *= m # apply mask to weight matrix
+
+
+def prune_out(sparsity, i, n_iter, fcs, masks, isIterative):
+  '''
+  Prune by out-degree of each node (constrain number of non-zero elements per 
+  column.)
+  '''
+  ratio = sparsity ** (1 / n_iter)
+  l = len(fcs)
+  for j in range(l):
+    (n_rows, n_cols) = np.shape(masks[j]) 
+    print("n_rows: %d, n_cols: %d" %(n_rows, n_cols))
+    w = fcs[j].weight.data.abs() # abs. val. weight matrix
+    m = masks[j] # get corresponding mask for this matrix
+    n = (m[:,0] > 0).sum() # n = number of nonzero elements per col
+    d = int(n * (1-sparsity)) # number of values to get rid of
+    if (isIterative):
+      d = int(n * (1 - ratio))
+
+    if (not isIterative and i==0) or (isIterative):
+      for col in range(n_cols):
+        ps = w[:,col][m[:,col] > 0]
+        ps = ps.sort() # tuple of (values, indices)
+        r = ps.values[d] # get the dth smallest value in the matrix
+        m[:,col][w[:,col] < r] = 0 # update mask
+
+    masks[j] = m # update masks list
+    fcs[j].weight.data *= m # apply mask to weight matrix
+
+
+def prune_hidden_out(sparsity, i, n_iter, fcs, masks, isIterative):
+  '''
+  Prune hidden layers by out-degree, and prune last layer overall.
+  '''
+  ratio = sparsity ** (1 / n_iter)
+  l = len(fcs)
+
+  for j in range(l):
+    (n_rows, n_cols) = np.shape(masks[j]) 
+    print("n_rows: %d, n_cols: %d" %(n_rows, n_cols))
+    w = fcs[j].weight.data.abs() # abs. val. weight matrix
+    m = masks[j] # get corresponding mask for this matrix
+
+    if (not isIterative and i==0 and j<l-1) or (isIterative):
+      n = (m[:,0] > 0).sum() # n = number of nonzero elements per col
+      d = int(n * (1-sparsity)) # number of values to get rid of
+      if (isIterative):
+        d = int(n * (1 - ratio))
+      for col in range(n_cols):
+        ps = w[:,col][m[:,col] > 0]
+        ps = ps.sort() # tuple of (values, indices)
+        r = ps.values[d] # get the dth smallest value in the matrix
+        m[:,col][w[:,col] < r] = 0 # update mask
+
+    # special treatment for last layer
+    if (not isIterative and i==0 and j==l-1) or (isIterative):
+      n = (m > 0).sum()
+      d = int(n * (1 - sparsity))
+      p = w[m > 0].view(-1)
+      r = p.sort().values[d]
+      m[w < r] = 0
+
+    masks[j] = m # update masks list
+    fcs[j].weight.data *= m # apply mask to weight matrix
+
+
+def prune_exact(sparsity, i, n_iter, fcs, masks, isIterative, n_PE):
+  '''
+  Prune so that each PE ends up having same sparsity per (sub)column.
+  '''
+  ratio = sparsity ** (1 / n_iter)
+  l = len(fcs)
+  for j in range(l):
+    (n_rows, n_cols) = np.shape(masks[j]) 
+    print("n_rows: %d, n_cols: %d" %(n_rows, n_cols))
+    w = fcs[j].weight.data.abs() # abs. val. weight matrix
+    m = masks[j] # get corresponding mask for this matrix
+    PE_rows = int(n_rows / n_PE) # length of each column in each PE
+
+    if (not isIterative and i==0 and j<l-1) or (isIterative):
+      for col in range(n_cols):
+        for PE in range(n_PE):
+          p = [(k, w[:,col][k]) for k in range(n_rows) if m[:,col][k] > 0 and k % n_PE == PE] # nonzero elements and their row indices
+          n = len(p)
+          d = int(n*(1-sparsity))
+          if (isIterative): d = int(n*(1-ratio))
+          p.sort(key=lambda tup: tup[1])
+          for r in range(0, d):
+            m[p[r][0], col] = 0
+
+    # special treatment for last layer
+    if (not isIterative and i==0 and j==l-1) or (isIterative):
+      n = (m > 0).sum()
+      d = int(n * (1 - sparsity))
+      p = w[m > 0].view(-1)
+      r = p.sort().values[d]
+      m[w < r] = 0
+
+    masks[j] = m # update masks list
+    fcs[j].weight.data *= m # apply mask to weight matrix
+          
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument('--dims', '-n', type=str, required=True,
@@ -52,10 +207,10 @@ def main():
                       help='Batch size')
   parser.add_argument('--lr', type=float, default=0.1, help='Learning rate')
   parser.add_argument('--save_file', '-f', type=str)
+  parser.add_argument('--num_PEs', '-N', type=int)
   args = parser.parse_args()
   sparsity = args.sparsity
   iterations = args.iterations
-  ratio = sparsity ** (1 / iterations)
 
   dims = args.dims.split(',')
   dims = [int(s) for s in dims]
@@ -78,64 +233,13 @@ def main():
       train_epoch(model, trainloader, optimizer, criterion, fcs, masks)
     test(model, testloader)
     print('Pruning...')
-    l = len(fcs)
-    for j in range(l):
-      (n_rows, n_cols) = np.shape(masks[j]) 
-      print("n_rows: %d, n_cols: %d" %(n_rows, n_cols))
-      w = fcs[j].weight.data.abs() # abs. val. weight matrix
-      m = masks[j] # get corresponding mask for this matrix
-      # n = (m[:,0] > 0).sum() # n = number of nonzero elements in a row/col of the mask
-      # #d = int(n * (1 - ratio)) # number of values to get rid of per row/col
-      # d = int(n_rows * (1-sparsity))
-      # print("n: %d, d: %d" %(n, d))
-      # p = w*m # apply the mask to W
 
-      # for row in range(n_rows):
-      #   ps = p[row][p[row] > 0]
-      #   ps = ps.sort() # tuple of (values, indices)
-      #   r = ps.values[d] # get the dth smallest value in the matrix
-      #   m[row][w[row] < r] = 0 # update mask
+    #prune_overall(sparsity, i, iterations, fcs, masks, False)
+    #prune_in(sparsity, i, iterations, fcs, masks, False)
+    #prune_out(sparsity, i, iterations, fcs, masks, False)
+    prune_hidden_out(sparsity, i, iterations, fcs, masks, False)
+    #prune_exact(sparsity, i, iterations, fcs, masks, False, 4)
 
-      if (i==0 and j < l-1): # fix sparsity pattern at the start of training
-        # n = (m[:,0] > 0).sum()
-        # d = int(n_rows * (1-sparsity))
-        # p = w*m # apply the mask to W
-        # for col in range(n_cols):
-        #   ps = p[:,col][p[:,col] > 0]
-        #   ps = ps.sort() # tuple of (values, indices)
-        #   r = ps.values[d] # get the dth smallest value in the matrix
-        #   m[:,col][w[:,col] < r] = 0 # update mask
-
-        n = (m[0,:] > 0).sum()
-        d = int(n_cols * (1-sparsity))
-        p = w*m # apply the mask to W
-        for row in range(n_rows):
-          ps = p[row,:][p[row,:] > 0]
-          ps = ps.sort() # tuple of (values, indices)
-          r = ps.values[d] # get the dth smallest value in the matrix
-          m[row,:][w[row,:] < r] = 0 # update mask
-
-      # special treatment for last layer
-      if (i==0 and j == l-1):
-      #if (j == l-1):
-        # n = (m[0,:] > 0).sum()
-        # d = int(n_cols * (1-sparsity))
-        #d = int(n * (1-ratio))
-        # p = w*m # apply the mask to W
-        # for row in range(n_rows):
-        #   ps = p[row][p[row] > 0]
-        #   ps = ps.sort() # tuple of (values, indices)
-        #   r = ps.values[d] # get the dth smallest value in the matrix
-        #   m[row][w[row] < r] = 0 # update mask
-        n = (m > 0).sum()
-        d = int(n * (1 - sparsity))
-        p = w[m > 0].view(-1)
-        r = p.sort().values[d]
-        m[w < r] = 0
-
-      masks[j] = m # update masks list
-      fcs[j].weight.data *= m # apply mask to weight matrix
-      #print("(%) nonzero elements per row: %d" %(fcs[j].weight.data[0] != 0).sum())
     test(model, testloader)
 
   p = [(fc.weight.data.numpy(), fc.bias.data.numpy()) for fc in fcs]
